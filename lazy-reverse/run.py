@@ -13,28 +13,28 @@ STACK_EXE = "stack"
 TARGET_EXE = "lazy-reverse"
 
 LIMITS = ["before", "after"]
-CONS = ["sum", "length"]
-PRODS = ["reverse", "rev_knot", "rev_forward", "rev_backward"]
+CONSUMERS = ["sum", "length"]
+PRODUCERS = ["reverse", "rev_knot", "rev_forw", "rev_back"]
 LISTS = ["nats", "fibs", "fibs'"]
 
-# Byte metrics ("allocated", "copied", "residency") are reported in MB (10^6 bytes).
+# Byte metrics ("alloc", "copied", "residency") are reported in MB (10^6 bytes).
 
 
 # Skip rules:
 # - reverse with after
 # - after with sum
-def is_skipped(limit: str, cons: str, prod: str) -> bool:
-    if limit == "after" and prod == "reverse":
+def is_skipped(limit: str, consumer: str, producer: str) -> bool:
+    if limit == "after" and producer == "reverse":
         return True
-    if limit == "after" and cons == "sum":
+    if limit == "after" and consumer == "sum":
         return True
     return False
 
 
 # Order for tidy table
-PROD_ORDER = ["reverse", "rev_forward", "rev_backward", "rev_knot"]
+PRODUCER_ORDER = ["reverse", "rev_forw", "rev_back", "rev_knot"]
 LIMIT_ORDER = ["before", "after"]
-CONS_ORDER = ["sum", "length"]
+CONSUMER_ORDER = ["sum", "length"]
 LIST_ORDER = ["nats", "fibs", "fibs'"]
 
 # Regex patterns for RTS -s parsing
@@ -114,7 +114,7 @@ def parse_rts_stats(text: str) -> Dict[str, Optional[float]]:
     m_gc = RE_GC.search(text)
     m_total = RE_TOTAL.search(text)
 
-    allocated = parse_bytes_num(m_alloc.group(1)) if m_alloc else None
+    alloc = parse_bytes_num(m_alloc.group(1)) if m_alloc else None
     copied = parse_bytes_num(m_copied.group(1)) if m_copied else None
     residency = parse_bytes_num(m_resid.group(1)) if m_resid else None
     memory = float(m_mem.group(1)) if m_mem else None
@@ -125,7 +125,7 @@ def parse_rts_stats(text: str) -> Dict[str, Optional[float]]:
     total_elapsed = float(m_total.group(2)) if m_total else None
 
     return {
-        "allocated": allocated,
+        "alloc": alloc,
         "copied": copied,
         "residency": residency,
         "memory_mib": memory,
@@ -147,16 +147,16 @@ def run_stack_build() -> None:
 
 
 def run_case(
-    limit: str, cons: str, prod: str, lst: str
+    producer: str, limit: str, consumer: str, lst: str
 ) -> Tuple[int, str, str]:
     cmd = [
         STACK_EXE,
         "exec",
         TARGET_EXE,
         "--",
+        producer,
         limit,
-        cons,
-        prod,
+        consumer,
         lst,
         "+RTS",
         "-s",
@@ -173,36 +173,36 @@ def run_case(
 
 
 def row_group_key(r: Dict) -> Tuple[str, str, str]:
-    # Group rows by (limit, cons, list) -> up to 4 prods per group
-    return (r["limit"], r["cons"], r["list"])
+    # Group rows by (limit, consumer, list) -> up to 4 producers per group
+    return (r["limit"], r["consumer"], r["list"])
 
 
 def main() -> None:
     run_stack_build()
 
     combos: List[Tuple[str, str, str, str]] = []
-    for limit, cons, prod, lst in itertools.product(
-        LIMITS, CONS, PRODS, LISTS
+    for producer, limit, consumer, lst in itertools.product(
+        PRODUCERS, LIMITS, CONSUMERS, LISTS
     ):
-        if is_skipped(limit, cons, prod):
+        if is_skipped(limit, consumer, producer):
             continue
-        combos.append((limit, cons, prod, lst))
+        combos.append((producer, limit, consumer, lst))
 
     results: List[Dict] = []
-    for i, (limit, cons, prod, lst) in enumerate(combos, 1):
+    for i, (producer, limit, consumer, lst) in enumerate(combos, 1):
         print(
-            f"[{i}/{len(combos)}] {limit} {cons} {prod} {lst}",
+            f"[{i}/{len(combos)}] {producer} {limit} {consumer} {lst}",
             file=sys.stderr,
         )
-        rc, out, errtag = run_case(limit, cons, prod, lst)
+        rc, out, errtag = run_case(producer, limit, consumer, lst)
         stats = parse_rts_stats(out)
 
         row = {
             "limit": limit,
-            "cons": cons,
-            "prod": prod,
+            "consumer": consumer,
+            "producer": producer,
             "list": lst,
-            "allocated": stats["allocated"],
+            "alloc": stats["alloc"],
             "copied": stats["copied"],
             "residency": stats["residency"],
             "memory_mib": stats["memory_mib"],
@@ -216,13 +216,13 @@ def main() -> None:
     # Per-group baselines (reverse)
     baselines: Dict[Tuple[str, str, str], float] = {}
     for r in results:
-        if r["prod"] == "reverse" and r["total_s"] is not None:
+        if r["producer"] == "reverse" and r["total_s"] is not None:
             baselines[row_group_key(r)] = r["total_s"]
 
     # Per-group best total among non-reverse rows
     group_best: Dict[Tuple[str, str, str], float] = {}
     for r in results:
-        if r["prod"] == "reverse":
+        if r["producer"] == "reverse":
             continue
         if r["total_s"] is None:
             continue
@@ -243,11 +243,11 @@ def main() -> None:
 
     # Build table (Markdown) with dynamic widths and vertical separators
     headers = [
+        "producer",
         "limit",
-        "cons",
-        "prod",
+        "consumer",
         "list",
-        "allocated",
+        "alloc",
         "copied",
         "residency",
         "memory",
@@ -258,35 +258,37 @@ def main() -> None:
     ]
 
     def row_to_strs(r: Dict) -> List[str]:
-        # Highlight the winning product (within group, excluding reverse)
+        # Highlight the winning producer (within group, excluding reverse)
         gk = row_group_key(r)
         best = group_best.get(gk)
         is_winner = (
-            r["prod"] != "reverse"
+            r["producer"] != "reverse"
             and r["total_s"] is not None
             and best is not None
             and abs(r["total_s"] - best) < 1e-12
         )
-        if r["prod"] == "reverse":
-            prod_name = "reverse"
+        if r["producer"] == "reverse":
+            producer_label = "reverse"
         elif is_winner:
-            prod_name = f"**{r['prod']}**"
+            producer_label = f"**{r['producer']}**"
         else:
-            prod_name = r["prod"]
+            producer_label = r["producer"]
 
         if r["x_base"] is not None:
             xbase_str = (
-                "1.00x" if r["prod"] == "reverse" else f"{r['x_base']:.2f}x"
+                "1.00x"
+                if r["producer"] == "reverse"
+                else f"{r['x_base']:.2f}x"
             )
         else:
-            xbase_str = "n/a" if r["prod"] != "reverse" else "-"
+            xbase_str = "n/a" if r["producer"] != "reverse" else "-"
 
         return [
+            producer_label,
             r["limit"],
-            r["cons"],
-            prod_name,
+            r["consumer"],
             r["list"],
-            fmt_bytes_3sig(r["allocated"]),
+            fmt_bytes_3sig(r["alloc"]),
             fmt_bytes_3sig(r["copied"]),
             fmt_bytes_3sig(r["residency"]),
             fmt_mib(r["memory_mib"]),
@@ -304,7 +306,7 @@ def main() -> None:
     def group_sort_key(gk: Tuple[str, str, str]) -> Tuple[int, int, int]:
         return (
             LIMIT_ORDER.index(gk[0]),
-            CONS_ORDER.index(gk[1]),
+            CONSUMER_ORDER.index(gk[1]),
             LIST_ORDER.index(gk[2]),
         )
 
@@ -314,8 +316,8 @@ def main() -> None:
     for gk in ordered_group_keys:
         entries = grouped[gk]
         entries.sort(
-            key=lambda entry: PROD_ORDER.index(entry["prod"])
-            if entry["prod"] in PROD_ORDER
+            key=lambda entry: PRODUCER_ORDER.index(entry["producer"])
+            if entry["producer"] in PRODUCER_ORDER
             else 999
         )
         for entry in entries:

@@ -24,31 +24,31 @@ rev_knot xs0 = let (xs3, xs5) = go [] xs3 xs0 in xs5 where
         in (xs3, x4:xs5)
 {-# INLINE rev_knot #-}
 
-rev_forward :: [a] -> [a]
-rev_forward xs0 = foldr (\_ k ~(x:xs) -> x : k xs) (\_ -> []) xs0 (reverse xs0)
-{-# INLINE rev_forward #-}
+rev_forw :: [a] -> [a]
+rev_forw xs0 = foldr (\_ k ~(x:xs) -> x : k xs) (\_ -> []) xs0 (reverse xs0)
+{-# INLINE rev_forw #-}
 
-rev_backward :: [a] -> [a]
-rev_backward xs0 = snd $ foldr (\_ ~(~(x:xs1), xs2) -> (xs1, x:xs2)) (xs0, []) xs0
-{-# INLINE rev_backward #-}
+rev_back :: [a] -> [a]
+rev_back xs0 = snd $ foldr (\_ ~(~(x:xs1), xs2) -> (xs1, x:xs2)) (xs0, []) xs0
+{-# INLINE rev_back #-}
 
 main :: IO ()
 main = do
-  [limitName, consName, prodName, listName] <- getArgs
+  [producerName, limitName, consumerName, listName] <- getArgs
   let n = 1000000
       (pre, post) = case limitName of
           "before" -> (take n, id)
           "after" -> (id, take n)
-      cons = case consName of
+      consumer = case consumerName of
           "sum" -> sum
           "length" -> length
-      prod = case prodName of
+      producer = case producerName of
           "reverse"      -> reverse
           "rev_knot"     -> rev_knot
-          "rev_forward"  -> rev_forward
-          "rev_backward" -> rev_backward
+          "rev_forw"     -> rev_forw
+          "rev_back"     -> rev_back
       list = case listName of
           "nats"  -> nats
           "fibs"  -> fibs
           "fibs'" -> fibs'
-  print . cons . post . prod $ pre list
+  print . consumer . post . producer $ pre list
